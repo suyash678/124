@@ -1,0 +1,230 @@
+<div class="search-overlay">
+
+  <!-- ── HEADER ──────────────────────────────────────────────────────────── -->
+  <div class="search-header">
+    <div class="header-left">
+      <h2 class="page-title">Advanced Search</h2>
+      <span class="col-count">{{ selectedColumns.length }}/{{ maxColumns }} columns</span>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-ghost" (click)="selectorOpen = !selectorOpen">
+        ⚙ {{ selectorOpen ? 'Hide Columns' : 'Select Columns' }}
+      </button>
+      <button class="btn btn-ghost" (click)="clearAll()"
+              [disabled]="!hasSearched && !activeFilters.length">
+        Clear All
+      </button>
+      <button class="btn btn-primary" (click)="search()"
+              [disabled]="loading || selectedColumns.length === 0">
+        <span *ngIf="loading">Searching…</span>
+        <span *ngIf="!loading">Search →</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── BODY ─────────────────────────────────────────────────────────────── -->
+  <div class="search-body">
+
+    <!-- ── COLUMN SELECTOR PANEL ────────────────────────────────────────── -->
+    <div class="col-panel" [class.open]="selectorOpen">
+      <div class="panel-inner">
+
+        <div class="panel-head">
+          <span class="panel-title">Column Selector</span>
+          <span class="panel-note">{{ selectedColumns.length }}/{{ maxColumns }}</span>
+        </div>
+
+        <div *ngIf="columnsLoading" class="col-loading">Loading columns…</div>
+
+        <div *ngIf="columnsError && !columnsLoading" class="col-error">
+          ⚠ {{ columnsError }}
+        </div>
+
+        <div class="panel-search-row" *ngIf="!columnsLoading">
+          <input class="panel-search" type="text"
+                 placeholder="Search {{ dynamicColumns.length }} columns…"
+                 [(ngModel)]="selectorSearch"/>
+        </div>
+
+        <div class="col-list" *ngIf="!columnsLoading">
+          <div *ngFor="let col of filteredColumns; trackBy: trackByColumn"
+               class="col-item"
+               [class.selected]="isSelected(col)"
+               (click)="toggleColumn(col)">
+            <div class="col-cb">
+              <span *ngIf="isSelected(col)">✓</span>
+            </div>
+            <span class="col-label">{{ col.label }}</span>
+          </div>
+          <div *ngIf="filteredColumns.length === 0" class="col-empty">
+            No columns match
+          </div>
+        </div>
+
+        <div *ngIf="selectedColumns.length >= maxColumns" class="limit-warn">
+          ⚠ Maximum {{ maxColumns }} columns reached
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── RIGHT SIDE ────────────────────────────────────────────────────── -->
+    <div class="right-side">
+
+      <!-- Selected column tags -->
+      <div class="selected-tags" *ngIf="selectedColumns.length">
+        <span class="tags-label">Columns:</span>
+        <div class="tags-list">
+          <span *ngFor="let col of selectedColumns" class="col-tag">
+            {{ col.label }}
+            <button class="tag-remove" (click)="removeColumn(col)">×</button>
+          </span>
+        </div>
+      </div>
+
+      <!-- ── FILTERS ────────────────────────────────────────────────────── -->
+      <div class="filters-section">
+
+        <div class="filters-head">
+          <span class="section-title">Filters</span>
+          <select class="add-filter-select" #filterColSelect
+                  [disabled]="selectedColumns.length === 0">
+            <option value="">— Select a column —</option>
+            <option *ngFor="let col of selectedColumns" [value]="col.column">
+              {{ col.label }}
+            </option>
+          </select>
+          <button class="btn btn-add-filter"
+                  (click)="addFilterFromSelect(filterColSelect)"
+                  [disabled]="selectedColumns.length === 0">
+            + Add Filter
+          </button>
+        </div>
+
+        <!-- Active filters -->
+        <div class="filters-list" *ngIf="activeFilters.length">
+          <div *ngFor="let f of activeFilters; let i = index" class="filter-row">
+
+            <span class="filter-col">{{ f.def.label }}</span>
+
+            <select class="filter-op"
+                    (change)="updateFilterOperator(i, $any($event.target).value)">
+              <option *ngFor="let op of operators"
+                      [value]="op.value"
+                      [selected]="op.value === f.operator">
+                {{ op.label }}
+              </option>
+            </select>
+
+            <!-- Single value — ngModel keeps focus while typing -->
+            <ng-container *ngIf="f.operator !== 'range'">
+              <input class="filter-val" type="text"
+                     [placeholder]="getValuePlaceholder(f)"
+                     [ngModel]="f.value"
+                     (ngModelChange)="updateFilterValue(i, $any($event))"/>
+            </ng-container>
+
+            <!-- Range: two inputs -->
+            <ng-container *ngIf="f.operator === 'range'">
+              <input class="filter-val filter-val-half" type="text" placeholder="From"
+                     [ngModel]="f.value"
+                     (ngModelChange)="updateFilterValue(i, $any($event))"/>
+              <span class="range-sep">–</span>
+              <input class="filter-val filter-val-half" type="text" placeholder="To"
+                     [ngModel]="f.value2 ?? ''"
+                     (ngModelChange)="updateFilterValue2(i, $any($event))"/>
+            </ng-container>
+
+            <button class="filter-remove" (click)="removeFilter(i)" title="Remove">×</button>
+          </div>
+        </div>
+
+        <div *ngIf="!activeFilters.length" class="filters-empty">
+          No filters added yet — select a column above and click Add Filter.
+        </div>
+
+      </div>
+
+      <!-- Error -->
+      <div *ngIf="errorMsg" class="error-bar">⚠ {{ errorMsg }}</div>
+
+      <!-- ── RESULTS ────────────────────────────────────────────────────── -->
+      <div class="results-section" *ngIf="hasSearched && !loading">
+
+        <div class="results-toolbar">
+          <span class="result-count">
+            {{ filteredRows.length.toLocaleString() }}
+            vessel{{ filteredRows.length !== 1 ? 's' : '' }}
+            <span *ngIf="filterText"> (filtered)</span>
+          </span>
+          <input class="result-search" type="text" placeholder="Filter results…"
+                 [(ngModel)]="filterText" (ngModelChange)="currentPage = 1"/>
+          <button class="btn btn-ghost btn-sm" (click)="exportCSV()"
+                  [disabled]="!results.length">
+            ⬇ Export CSV
+          </button>
+        </div>
+
+        <div class="table-wrap">
+          <table class="results-table">
+            <thead>
+              <tr>
+                <th *ngFor="let col of selectedColumns"
+                    (click)="sortBy(col.column)"
+                    [class.sort-asc]="sortColumn === col.column && sortAsc"
+                    [class.sort-desc]="sortColumn === col.column && !sortAsc">
+                  {{ col.label }}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let row of pagedRows; trackBy: trackByIndex">
+                <td *ngFor="let col of selectedColumns"
+                    [class]="getCellClass(col, row[col.column])"
+                    [title]="$any(row[col.column]) ?? ''">
+                  {{ row[col.column] ?? '—' }}
+                </td>
+              </tr>
+              <tr *ngIf="!pagedRows.length">
+                <td [attr.colspan]="selectedColumns.length" class="empty-row">
+                  {{ results.length ? 'No rows match your filter.' : 'No results found.' }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pagination" *ngIf="totalPages > 1">
+          <button class="pg-btn" (click)="goToPage(currentPage - 1)"
+                  [disabled]="currentPage === 1">‹</button>
+          <ng-container *ngFor="let p of pages">
+            <span *ngIf="p === -1" class="pg-ell">…</span>
+            <button *ngIf="p !== -1" class="pg-btn"
+                    [class.active]="p === currentPage"
+                    (click)="goToPage(p)">{{ p }}</button>
+          </ng-container>
+          <button class="pg-btn" (click)="goToPage(currentPage + 1)"
+                  [disabled]="currentPage === totalPages">›</button>
+          <span class="pg-info">
+            Page {{ currentPage }}/{{ totalPages }} · {{ filteredRows.length.toLocaleString() }} rows
+          </span>
+        </div>
+
+      </div>
+
+      <!-- Loading -->
+      <div *ngIf="loading" class="loading-state">
+        <div class="spinner"></div>
+        <span>Querying shipinfo_final…</span>
+      </div>
+
+      <!-- Empty state -->
+      <div *ngIf="!hasSearched && !loading" class="empty-state">
+        <div class="empty-icon">🔍</div>
+        <p>Select columns, add filters, then click <strong>Search</strong>.</p>
+        <p class="empty-sub">Queries run against <code>shipinfo_final</code>.</p>
+      </div>
+
+    </div>
+  </div>
+</div>
